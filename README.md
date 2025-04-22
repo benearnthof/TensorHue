@@ -62,7 +62,7 @@ Pillow images can be visualized in RGB and other color modes:
 
 ```python
 from torchvision.datasets import CIFAR10
-dataset = CIFAR10('.', dowload=True)
+dataset = CIFAR10('.', download=True)
 img = dataset[0][0]
 tensorhue.viz(img) ✅
 ```
@@ -120,3 +120,22 @@ tensorhue.viz(conf_matrix, vmin=0, vmax=1, scale=3)
 </div>
 
 The `scale` parameter scales up the 'pixels' of the tensor so that small tensors are easier to view.
+
+## Rendering 3D Tensors
+
+TensorHue also allows rendering 3D Tensors like MRI volumes, GIFs, Videos, or simply batches of images, both automatically and manually. This example stacks a bunch of CIFAR images and renders the resulting volume in a 3x3 grid.
+
+```python
+import torch
+from einops import rearrange
+from torchvision.transforms.functional import pil_to_tensor
+from tensorhue.viz import viz_batch_volume_manual
+batch = [pil_to_tensor(dataset[i][0]) for i in range(261)]
+batch = torch.stack(batch)
+big_batch = rearrange(batch, 'b c h w -> (b c) h w')
+big_batch = rearrange(big_batch, '(b c) h w -> b c h w', b=9)
+viz_batch_volume_manual(big_batch)
+```
+
+You can step through the slices with A+D (or use the left and right arrow keys) and quit the visualization with Q. 
+
