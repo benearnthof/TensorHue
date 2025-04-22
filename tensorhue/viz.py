@@ -1,12 +1,17 @@
 from __future__ import annotations  # backwards type hint compatability for Python 3.7 and 3.8
 import os
 import sys
+import time
+import math
 import warnings
+import readchar
 from rich.console import Console
+from rich.live import Live
 import numpy as np
 from tensorhue.colors import ColorScheme
 from tensorhue._print_opts import PRINT_OPTS
 from tensorhue.converters import tensor_to_numpy, mro_to_strings
+
 
 
 def viz(tensor, **kwargs):
@@ -183,3 +188,216 @@ def get_terminal_size(default_width: int = 100, default_height: int = 70) -> os.
             return os.terminal_size((default_width, default_height))
     else:
         return os.terminal_size((default_width, default_height))
+
+# Visualizing volumetric data (For MRI or videos)
+def viz_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
+    """
+    Visualizes a 3D tensor as an animation through slices.
+
+    Args:
+        tensor (Tensor or ndarray): 3D tensor to visualize (e.g. shape [D, H, W]).
+        axis (int): Axis along which to slice.
+        pause (float): Time to wait between frames in seconds.
+        colorscheme (ColorScheme, optional): Color scheme to use.
+        scale (int): Scaling factor for slice visualization.
+        legend (bool): Show slice index and shape.
+        **kwargs: Passed to color scheme.
+    """
+    np_array = tensor_to_numpy(tensor)
+    
+    if np_array.ndim != 3:
+        raise ValueError("Only 3D tensors can be passed to viz_volume")
+
+    np_array = np.moveaxis(np_array, axis, 0)  # Make slice axis first
+    n_slices = np_array.shape[0]
+    console = Console()
+    with Live(console=console, refresh_per_second=1 / pause, screen=False) as live:
+        for i in range(0, n_slices, stride):
+            slice_2d = np_array[i]
+            scaled = np.repeat(np.repeat(slice_2d, scale, axis=1), scale, axis=0)
+            lines = _viz_2d(scaled, colorscheme, **kwargs)
+            if legend:
+               lines.append(f"[italic]slice = {i}/{n_slices - 1}, shape = {slice_2d.shape}[/]")
+               # lines.append(f"[italic]shape = {shape}[/]")
+            live.update("\n".join(lines))
+            time.sleep(pause)
+
+
+def viz_volume_manual(tensor, axis=0, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
+    """
+    Interactive 3D tensor viewer using keyboard input.
+
+    Keys:
+    [a] ← : previous slice
+    [d] → : next slice
+    [q]   : quit
+    """
+    np_array = tensor_to_numpy(tensor)
+
+    if np_array.ndim != 3:
+        raise ValueError("Only 3D tensors can be passed to viz_volume_manual")
+
+    np_array = np.moveaxis(np_array, axis, 0)
+    n_slices = np_array.shape[0]
+    idx = 0
+
+    console = Console()
+
+    def get_render(idx):
+        slice_2d = np_array[idx]
+        scaled = np.repeat(np.repeat(slice_2d, scale, axis=1), scale, axis=0)
+        lines = _viz_2d(scaled, colorscheme, **kwargs)
+        if legend:
+            lines.append(f"[italic]slice = {idx}/{n_slices - 1}, shape = {slice_2d.shape}[/]")
+            lines.append("\u25C4 a |q quit| d \u25BA")
+        return "\n".join(lines)
+
+    with Live(get_render(idx), console=console, screen=False, auto_refresh=False) as live:
+        while True:
+            key = readchar.readkey()
+            new_idx = idx
+            if key == "q":
+                break
+            elif key in ("d", readchar.key.RIGHT):
+                new_idx = (idx + stride) % n_slices
+            elif key in ("a", readchar.key.LEFT):
+                new_idx = (idx - stride) % n_slices
+            if new_idx != idx:
+                idx = new_idx
+                live.update(get_render(idx), refresh=True)
+
+
+def viz_batch_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
+    """
+    Animated viewer for a batch of 3D tensors.
+
+    Args:
+        tensor (Tensor or ndarray): 4D tensor of shape [B, D, H, W].
+        axis (int): Axis within each volume to slice along.
+        pause (float): Time to wait between frames (in seconds).
+        colorscheme: Optional color scheme.
+        scale (int): Visual scaling factor.
+        legend (bool): Show slice index.
+        stride (int): Step size between slices.
+    """
+    np_array = tensor_to_numpy(tensor)
+
+    if np_array.ndim != 4:
+        raise ValueError("Tensor must be 4D [B, D, H, W]")
+
+    B = np_array.shape[0]
+    volumes = [np.moveaxis(np_array[b], axis, 0) for b in range(B)]
+    n_slices = volumes[0].shape[0]
+
+    console = Console()
+
+    grid_rows = int(math.floor(math.sqrt(B)))
+    grid_cols = int(math.ceil(B / grid_rows))
+
+    def get_render(idx):
+        rendered = []
+
+        for b in range(B):
+            slice_2d = volumes[b][idx]
+            scaled = np.repeat(np.repeat(slice_2d, scale, axis=1), scale, axis=0)
+            lines = _viz_2d(scaled, colorscheme, **kwargs)
+            rendered.append(lines)
+
+        max_height = max(len(r) for r in rendered)
+        for r in rendered:
+            while len(r) < max_height:
+                r.append("")
+
+        lines = []
+        for row in range(grid_rows):
+            line_blocks = []
+            for col in range(grid_cols):
+                idx_in_batch = row * grid_cols + col
+                if idx_in_batch < B:
+                    line_blocks.append(rendered[idx_in_batch])
+            for i in range(max_height):
+                lines.append("".join(block[i] for block in line_blocks if i < len(block)))
+
+        if legend:
+            lines.append(f"[italic]slice = {idx}/{n_slices - 1}[/]")
+
+        return "\n".join(lines)
+
+    with Live(console=console, screen=False, refresh_per_second=1 / pause) as live:
+        for idx in range(0, n_slices, stride):
+            live.update(get_render(idx))
+            time.sleep(pause)
+
+
+def viz_batch_volume_manual(tensor, axis=0, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
+    """
+    Interactive viewer for a batch of 3D tensors.
+
+    Args:
+        tensor (Tensor or ndarray): 4D tensor of shape [B, D, H, W].
+        axis (int): Slice axis within each volume.
+        colorscheme: Optional color scheme.
+        scale (int): Visual scaling factor.
+        stride (int): Step size when navigating.
+    """
+    np_array = tensor_to_numpy(tensor) # TODO tensor
+
+    if np_array.ndim != 4:
+        raise ValueError("Tensor must be 4D [B, D, H, W]")
+
+    B = np_array.shape[0]
+    volumes = [np.moveaxis(np_array[b], axis, 0) for b in range(B)]
+    n_slices = volumes[0].shape[0]
+
+    idx = 0
+    console = Console()
+
+    grid_rows = int(math.floor(math.sqrt(B)))
+    grid_cols = int(math.ceil(B / grid_rows))
+
+    def get_render(idx):
+        rendered = []
+
+        for b in range(B):
+            slice_2d = volumes[b][idx]
+            scaled = np.repeat(np.repeat(slice_2d, scale, axis=1), scale, axis=0)
+            lines = _viz_2d(scaled, colorscheme, **kwargs)
+            rendered.append(lines)
+
+        # Pad all rendered blocks to same height
+        max_height = max(len(r) for r in rendered)
+        for r in rendered:
+            while len(r) < max_height:
+                r.append("")
+
+        # Arrange in grid
+        lines = []
+        for row in range(grid_rows):
+            line_blocks = []
+            for col in range(grid_cols):
+                idx_in_batch = row * grid_cols + col
+                if idx_in_batch < B:
+                    line_blocks.append(rendered[idx_in_batch])
+            for i in range(max_height):
+                lines.append("".join(block[i] for block in line_blocks if i < len(block)))
+
+        if legend:
+            lines.append(f"[italic]slice = {idx}/{n_slices - 1}[/]")
+            lines.append("[dim]\u25C4 a |q quit| d \u25BA[/]")
+
+        return "\n".join(lines)
+
+    with Live(get_render(idx), console=console, screen=False, auto_refresh=False) as live:
+        while True:
+            key = readchar.readkey()
+            new_idx = idx
+            if key == "q":
+                break
+            elif key in ("d", readchar.key.RIGHT):
+                new_idx = (idx + stride) % n_slices
+            elif key in ("a", readchar.key.LEFT):
+                new_idx = (idx - stride) % n_slices
+
+            if new_idx != idx:
+                idx = new_idx
+                live.update(get_render(idx), refresh=True)
