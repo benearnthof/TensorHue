@@ -13,7 +13,6 @@ from tensorhue._print_opts import PRINT_OPTS
 from tensorhue.converters import tensor_to_numpy, mro_to_strings
 
 
-
 def viz(tensor, **kwargs):
     try:
         mro_strings = mro_to_strings(tensor.__class__.__mro__)
@@ -189,6 +188,7 @@ def get_terminal_size(default_width: int = 100, default_height: int = 70) -> os.
     else:
         return os.terminal_size((default_width, default_height))
 
+
 # Visualizing volumetric data (For MRI or videos)
 def viz_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
     """
@@ -204,7 +204,7 @@ def viz_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale
         **kwargs: Passed to color scheme.
     """
     np_array = tensor_to_numpy(tensor)
-    
+
     if np_array.ndim != 3:
         raise ValueError("Only 3D tensors can be passed to viz_volume")
 
@@ -217,8 +217,8 @@ def viz_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale
             scaled = np.repeat(np.repeat(slice_2d, scale, axis=1), scale, axis=0)
             lines = _viz_2d(scaled, colorscheme, **kwargs)
             if legend:
-               lines.append(f"[italic]slice = {i}/{n_slices - 1}, shape = {slice_2d.shape}[/]")
-               # lines.append(f"[italic]shape = {shape}[/]")
+                lines.append(f"[italic]slice = {i}/{n_slices - 1}, shape = {slice_2d.shape}[/]")
+                # lines.append(f"[italic]shape = {shape}[/]")
             live.update("\n".join(lines))
             time.sleep(pause)
 
@@ -267,7 +267,9 @@ def viz_volume_manual(tensor, axis=0, colorscheme: ColorScheme = None, scale=1, 
                 live.update(get_render(idx), refresh=True)
 
 
-def viz_batch_volume(tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs):
+def viz_batch_volume(
+    tensor, axis=0, pause=0.1, colorscheme: ColorScheme = None, scale=1, legend=True, stride=1, **kwargs
+):
     """
     Animated viewer for a batch of 3D tensors.
 
@@ -340,7 +342,7 @@ def viz_batch_volume_manual(tensor, axis=0, colorscheme: ColorScheme = None, sca
         scale (int): Visual scaling factor.
         stride (int): Step size when navigating.
     """
-    np_array = tensor_to_numpy(tensor) # TODO tensor
+    np_array = tensor_to_numpy(tensor)  # TODO tensor
 
     if np_array.ndim != 4:
         raise ValueError("Tensor must be 4D [B, D, H, W]")
